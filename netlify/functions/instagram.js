@@ -2,108 +2,105 @@ exports.handler = async function () {
 
     const username = "rapip__cvmu";
 
-    const profileUrl = `https://www.instagram.com/${username}/`;
+    const headers = {
+        "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "Chrome/140.0.0.0 Safari/537.36",
+
+        "X-IG-App-ID": "936619743392459",
+
+        "Accept": "*/*",
+
+        "Accept-Language": "en-US,en;q=0.9",
+
+        "Referer":
+            `https://www.instagram.com/${username}/`,
+
+        "X-Requested-With": "XMLHttpRequest"
+    };
+
 
     try {
 
-        const response = await fetch(profileUrl, {
+        /*
+        |--------------------------------------------------------------------------
+        | Instagram internal feed endpoint
+        |--------------------------------------------------------------------------
+        */
+
+        const apiUrl =
+            `https://www.instagram.com/api/v1/feed/user/${username}/username/?count=6`;
+
+
+        const response = await fetch(apiUrl, {
             method: "GET",
-            headers: {
-                "User-Agent":
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-                    "AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) " +
-                    "Chrome/140.0.0.0 Safari/537.36",
-
-                "Accept":
-                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-
-                "Accept-Language":
-                    "en-US,en;q=0.9",
-
-                "Cache-Control":
-                    "no-cache"
-            }
+            headers: headers
         });
 
-        const html = await response.text();
+
+        const text = await response.text();
+
+
+        console.log("Instagram HTTP:", response.status);
+        console.log("Instagram response length:", text.length);
+
 
         if (!response.ok) {
 
             return {
                 statusCode: 502,
+
                 headers: {
                     "Content-Type": "application/json",
                     "Access-Control-Allow-Origin": "*"
                 },
+
                 body: JSON.stringify({
-                    error: "Instagram request failed",
-                    status: response.status
+
+                    success: false,
+
+                    status: response.status,
+
+                    message:
+                        "Instagram feed request failed.",
+
+                    response:
+                        text.substring(0, 500)
+
                 })
             };
 
         }
 
 
-        /*
-        ----------------------------------------------------
-        Extract Instagram post / reel URLs
-        ----------------------------------------------------
-        */
-
-        const regex =
-            /https:\/\/www\.instagram\.com\/(p|reel)\/([^/?"]+)/g;
-
-        const found = [];
-
-        let match;
-
-        while ((match = regex.exec(html)) !== null) {
-
-            const type = match[1];
-            const code = match[2];
-
-            const url =
-                `https://www.instagram.com/${type}/${code}/`;
-
-            if (!found.some(post => post.url === url)) {
-
-                found.push({
-                    url: url,
-                    shortcode: code,
-                    type: type
-                });
-
-            }
-
-            if (found.length >= 3) {
-                break;
-            }
-        }
+        let data;
 
 
-        /*
-        ----------------------------------------------------
-        No posts found
-        ----------------------------------------------------
-        */
+        try {
 
-        if (found.length === 0) {
+            data = JSON.parse(text);
+
+        } catch (error) {
 
             return {
-                statusCode: 200,
+                statusCode: 502,
 
                 headers: {
                     "Content-Type": "application/json",
-                    "Access-Control-Allow-Origin": "*",
-                    "Cache-Control": "public, max-age=1800"
+                    "Access-Control-Allow-Origin": "*"
                 },
 
                 body: JSON.stringify({
+
                     success: false,
-                    posts: [],
+
                     message:
-                        "Instagram did not expose public post data."
+                        "Instagram did not return JSON.",
+
+                    response:
+                        text.substring(0, 500)
+
                 })
             };
 
@@ -111,9 +108,214 @@ exports.handler = async function () {
 
 
         /*
-        ----------------------------------------------------
-        Return posts
-        ----------------------------------------------------
+        |--------------------------------------------------------------------------
+        | Instagram items
+        |--------------------------------------------------------------------------
+        */
+
+        const items = Array.isArray(data.items)
+            ? data.items
+            : [];
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Convert Instagram items
+        |--------------------------------------------------------------------------
+        */
+
+        const posts = [];
+
+
+        for (const item of items) {
+
+            if (posts.length >= 3) {
+                break;
+            }
+
+
+            /*
+            | Post shortcode
+            */
+
+            const shortcode =
+                item.code ||
+                item.media_code ||
+                item.pk;
+
+
+            if (!shortcode) {
+                continue;
+            }
+
+
+            /*
+            | Image
+            */
+
+            let image = "";
+
+
+            if (
+                item.image_versions2 &&
+                Array.isArray(
+                    item.image_versions2.candidates
+                ) &&
+                item.image_versions2.candidates.length > 0
+            ) {
+
+                /*
+                 * First candidate is generally
+                 * the largest/primary image.
+                 */
+
+                image =
+                    item.image_versions2
+                        .candidates[0]
+                        .url || "";
+
+            }
+
+
+            /*
+            | Carousel
+            */
+
+            if (
+                !image &&
+                item.carousel_media &&
+                Array.isArray(item.carousel_media) &&
+                item.carousel_media.length > 0
+            ) {
+
+                const first =
+                    item.carousel_media[0];
+
+
+                if (
+                    first.image_versions2 &&
+                    Array.isArray(
+                        first.image_versions2.candidates
+                    ) &&
+                    first.image_versions2.candidates.length
+                ) {
+
+                    image =
+                        first.image_versions2
+                            .candidates[0]
+                            .url || "";
+
+                }
+
+            }
+
+
+            /*
+            | Caption
+            */
+
+            let caption =
+                "Rita A. Patel Institute of Physiotherapy";
+
+
+            if (
+                item.caption &&
+                typeof item.caption.text === "string"
+            ) {
+
+                caption =
+                    item.caption.text;
+
+            }
+
+
+            /*
+            | Date
+            */
+
+            let date = "";
+
+
+            if (item.taken_at) {
+
+                const timestamp =
+                    Number(item.taken_at) * 1000;
+
+
+                const d =
+                    new Date(timestamp);
+
+
+                date =
+                    d.toLocaleDateString(
+                        "en-IN",
+                        {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric"
+                        }
+                    );
+
+            }
+
+
+            /*
+            | Media type
+            */
+
+            let mediaType =
+                "IMAGE";
+
+
+            if (item.media_type === 2) {
+                mediaType = "VIDEO";
+            }
+
+            if (item.media_type === 8) {
+                mediaType = "CAROUSEL";
+            }
+
+
+            /*
+            | Post URL
+            */
+
+            const postUrl =
+                `https://www.instagram.com/p/${item.code || shortcode}/`;
+
+
+            posts.push({
+
+                id:
+                    String(
+                        item.pk ||
+                        shortcode
+                    ),
+
+                url:
+                    postUrl,
+
+                image:
+                    image,
+
+                caption:
+                    caption,
+
+                date:
+                    date,
+
+                media_type:
+                    mediaType
+
+            });
+
+        }
+
+
+        /*
+        |--------------------------------------------------------------------------
+        | Final response
+        |--------------------------------------------------------------------------
         */
 
         return {
@@ -121,18 +323,35 @@ exports.handler = async function () {
             statusCode: 200,
 
             headers: {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "public, max-age=1800"
+
+                "Content-Type":
+                    "application/json",
+
+                "Access-Control-Allow-Origin":
+                    "*",
+
+                /*
+                 * Browser can cache for 30 minutes.
+                 */
+
+                "Cache-Control":
+                    "public, max-age=1800"
+
             },
 
             body: JSON.stringify({
 
-                success: true,
+                success:
+                    posts.length > 0,
 
-                username: username,
+                username:
+                    username,
 
-                posts: found
+                count:
+                    posts.length,
+
+                posts:
+                    posts
 
             })
 
@@ -141,20 +360,36 @@ exports.handler = async function () {
 
     } catch (error) {
 
+        console.error(
+            "Instagram error:",
+            error
+        );
+
+
         return {
 
             statusCode: 500,
 
             headers: {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*"
+
+                "Content-Type":
+                    "application/json",
+
+                "Access-Control-Allow-Origin":
+                    "*"
+
             },
 
             body: JSON.stringify({
 
-                success: false,
+                success:
+                    false,
 
-                error: error.message
+                message:
+                    "Function error",
+
+                error:
+                    error.message
 
             })
 
