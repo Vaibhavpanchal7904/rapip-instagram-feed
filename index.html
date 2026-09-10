@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>RAPIP Instagram Feed</title>
+
+    <style>
+
+        body {
+            font-family: Arial, sans-serif;
+            padding: 40px;
+            background: #f5f5f5;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        #posts {
+            max-width: 1000px;
+            margin: 30px auto;
+            display: grid;
+            grid-template-columns:
+                repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        .post {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow:
+                0 5px 20px rgba(0,0,0,.08);
+        }
+
+        .post a {
+            color: #176b87;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .loading {
+            text-align: center;
+            font-size: 18px;
+        }
+
+        @media(max-width:700px) {
+
+            #posts {
+                grid-template-columns: 1fr;
+            }
+
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+    <h1>
+        RAPIP Instagram Feed
+    </h1>
+
+    <div id="posts">
+
+        <div class="loading">
+            Loading Instagram posts...
+        </div>
+
+    </div>
+
+
+    <script>
+
+        async function loadInstagram() {
+
+            const container =
+                document.getElementById("posts");
+
+            try {
+
+                const response =
+                    await fetch(
+                        "/.netlify/functions/instagram"
+                    );
+
+                const data =
+                    await response.json();
+
+
+                if (
+                    !data.success ||
+                    !data.posts ||
+                    data.posts.length === 0
+                ) {
+
+                    container.innerHTML = `
+                        <div>
+                            Instagram posts could not
+                            be loaded.
+                        </div>
+                    `;
+
+                    return;
+                }
+
+
+                container.innerHTML = "";
+
+
+                data.posts.forEach(post => {
+
+                    const card =
+                        document.createElement("div");
+
+                    card.className = "post";
+
+
+                    card.innerHTML = `
+
+                        <p>
+                            Instagram Post
+                        </p>
+
+                        <a
+                            href="${post.url}"
+                            target="_blank"
+                            rel="noopener"
+                        >
+                            View Instagram Post →
+                        </a>
+
+                    `;
+
+
+                    container.appendChild(card);
+
+                });
+
+            }
+
+            catch (error) {
+
+                console.error(error);
+
+                container.innerHTML = `
+                    <div>
+                        Unable to load Instagram feed.
+                    </div>
+                `;
+
+            }
+
+        }
+
+
+        loadInstagram();
+
+    </script>
+
+</body>
+
+</html>
