@@ -64,34 +64,59 @@ exports.handler = async function () {
          * HANDLE HTTP ERRORS
          */
 
-        if (!response.ok) {
+        
+if (!response.ok) {
 
-            console.error(
-                "Instagram response:",
-                text.substring(0, 300)
-            );
+    const status = response.status;
 
-            return {
-                statusCode: 502,
+    const retryAfter =
+        response.headers.get("Retry-After") || "900";
 
-                headers: {
-                    "Content-Type": "application/json",
-                    "Access-Control-Allow-Origin": "*",
-                    "Cache-Control": "no-store"
-                },
+    console.error(
+        "Instagram HTTP Error:",
+        status
+    );
 
-                body: JSON.stringify({
-                    success: false,
-                    status: response.status,
+    if (status === 429) {
 
-                    message:
-                        "Instagram feed request failed.",
+        return {
+            statusCode: 429,
 
-                    response:
-                        text.substring(0, 300)
-                })
-            };
-        }
+            headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "no-store",
+                "Retry-After": retryAfter
+            },
+
+            body: JSON.stringify({
+                success: false,
+                status: 429,
+
+                message:
+                    "Instagram rate limit reached. Please try again later.",
+
+                retryAfter: Number(retryAfter) || 900
+            })
+        };
+    }
+
+    return {
+        statusCode: 502,
+
+        headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-store"
+        },
+
+        body: JSON.stringify({
+            success: false,
+            status: status,
+            message: "Instagram feed request failed."
+        })
+    };
+}
 
         /*
          * PARSE JSON
