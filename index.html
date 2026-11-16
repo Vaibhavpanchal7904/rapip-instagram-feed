@@ -1,9 +1,9 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
     <title>RAPIP Instagram Feed</title>
 
     <style>
@@ -13,95 +13,35 @@
 
         body {
             margin: 0;
-            padding: 40px 20px;
+            padding: 25px 15px;
             font-family: Arial, sans-serif;
             background: #f5f5f5;
         }
 
         h1 {
             text-align: center;
-            margin-bottom: 35px;
+            margin-bottom: 25px;
         }
 
-        #posts {
-            max-width: 1100px;
-            margin: auto;
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 25px;
-        }
-
-        .post {
-            background: #fff;
-            border-radius: 14px;
-            overflow: hidden;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
-        }
-
-        .post-image {
+        .instagram-container {
             width: 100%;
-            aspect-ratio: 1 / 1;
-            object-fit: cover;
-            display: block;
-        }
-
-        .post-content {
-            padding: 18px;
-        }
-
-        .post-date {
-            font-size: 13px;
-            color: #777;
-            margin-bottom: 10px;
-        }
-
-        .post-caption {
-            font-size: 14px;
-            line-height: 1.6;
-            color: #333;
-
-            display: -webkit-box;
-            -webkit-line-clamp: 4;
-            -webkit-box-orient: vertical;
+            max-width: 1200px;
+            margin: auto;
+            background: white;
+            border-radius: 12px;
             overflow: hidden;
         }
 
-        .post-link {
-            display: inline-block;
-            margin-top: 15px;
-            color: #176b87;
-            text-decoration: none;
-            font-weight: 600;
+        iframe {
+            display: block;
+            width: 100%;
+            height: 1000px;
+            border: none;
         }
 
-        .post-link:hover {
-            text-decoration: underline;
-        }
-
-        .loading,
-        .error {
-            text-align: center;
-            grid-column: 1 / -1;
-            padding: 40px;
-        }
-
-        .error {
-            color: #c0392b;
-        }
-
-        @media (max-width: 800px) {
-            #posts {
-                grid-template-columns: repeat(2, 1fr);
-            }
-        }
-
-        @media (max-width: 550px) {
-            #posts {
-                grid-template-columns: 1fr;
-            }
-
-            body {
-                padding: 25px 15px;
+        @media (max-width: 600px) {
+            iframe {
+                height: 850px;
             }
         }
     </style>
@@ -111,139 +51,14 @@
 
     <h1>RAPIP Instagram Feed</h1>
 
-    <div id="posts">
-        <div class="loading">
-            Loading Instagram posts...
-        </div>
+    <div class="instagram-container">
+        <iframe
+            src="https://www.instagram.com/rapip__cvmu/embed/"
+            title="RAPIP Instagram Feed"
+            loading="lazy"
+            allowtransparency="true">
+        </iframe>
     </div>
-
-
-    <script>
-
-        async function loadInstagram() {
-
-            const container = document.getElementById("posts");
-
-            try {
-
-                // Netlify Function
-                const apiUrl =
-                    "https://rapipi.netlify.app/.netlify/functions/instagram";
-
-               const response = await fetch("/instagram.json", {
-    cache: "no-store"
-});
-
-                console.log("HTTP Status:", response.status);
-
-                const data = await response.json();
-
-                console.log("Instagram API:", data);
-
-
-                if (
-                    !data.success ||
-                    !Array.isArray(data.posts) ||
-                    data.posts.length === 0
-                ) {
-
-                    container.innerHTML = `
-                        <div class="error">
-                            Instagram posts could not be loaded.
-                        </div>
-                    `;
-
-                    return;
-                }
-
-
-                container.innerHTML = "";
-
-
-                data.posts.forEach(post => {
-
-                    const card = document.createElement("article");
-
-                    card.className = "post";
-
-
-                    const image = post.image
-                        ? `<img 
-                                class="post-image"
-                                src="${post.image}"
-                                alt="RAPIP Instagram Post"
-                                loading="lazy"
-                                onerror="this.style.display='none'"
-                           >`
-                        : "";
-
-
-                    const caption = post.caption || "";
-
-
-                    card.innerHTML = `
-
-                        ${image}
-
-                        <div class="post-content">
-
-                            <div class="post-date">
-                                ${post.date || ""}
-                            </div>
-
-                            <div class="post-caption">
-                                ${escapeHTML(caption)}
-                            </div>
-
-                            <a
-                                class="post-link"
-                                href="${post.url}"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                            >
-                                View on Instagram →
-                            </a>
-
-                        </div>
-
-                    `;
-
-
-                    container.appendChild(card);
-
-                });
-
-            }
-
-            catch (error) {
-
-                console.error("Instagram Feed Error:", error);
-
-                container.innerHTML = `
-                    <div class="error">
-                        Unable to load Instagram feed.
-                    </div>
-                `;
-
-            }
-
-        }
-
-
-        function escapeHTML(text) {
-
-            const div = document.createElement("div");
-
-            div.textContent = text;
-
-            return div.innerHTML;
-
-        }
-
-
-        loadInstagram();
-
-    </script>
 
 </body>
 </html>
