@@ -1,3 +1,4 @@
+
 exports.handler = async function () {
 
     const username = "rapip__cvmu";
@@ -9,9 +10,7 @@ exports.handler = async function () {
             "Chrome/140.0.0.0 Safari/537.36",
 
         "X-IG-App-ID": "936619743392459",
-
         "Accept": "*/*",
-
         "Accept-Language": "en-US,en;q=0.9",
 
         "Referer":
@@ -20,391 +19,429 @@ exports.handler = async function () {
         "X-Requested-With": "XMLHttpRequest"
     };
 
-
     const MAX_POSTS = 12;
 
     let allPosts = [];
 
     let maxId = null;
 
-
     try {
 
         /*
-         * Fetch multiple pages until we have 12 posts
+         * FETCH INSTAGRAM PUBLIC PROFILE
          */
 
-        for (let page = 0; page < 5; page++) {
+        const apiUrl =
+            `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
 
-            let apiUrl =
-                `https://www.instagram.com/api/v1/feed/user/${username}/username/?count=12`;
+        console.log(
+            "Instagram request:",
+            apiUrl
+        );
 
-
-            if (maxId) {
-
-                apiUrl +=
-                    `&max_id=${encodeURIComponent(maxId)}`;
-
+        const response = await fetch(
+            apiUrl,
+            {
+                method: "GET",
+                headers: headers,
+                redirect: "follow"
             }
+        );
 
+        const text = await response.text();
 
-            console.log(
-                "Instagram request:",
-                apiUrl
+        console.log(
+            "Instagram HTTP:",
+            response.status
+        );
+
+        console.log(
+            "Response length:",
+            text.length
+        );
+
+        /*
+         * HANDLE HTTP ERRORS
+         */
+
+        if (!response.ok) {
+
+            console.error(
+                "Instagram response:",
+                text.substring(0, 300)
             );
 
+            return {
+                statusCode: 502,
 
-            const response = await fetch(
-                apiUrl,
-                {
-                    method: "GET",
-                    headers: headers
-                }
-            );
+                headers: {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "no-store"
+                },
 
+                body: JSON.stringify({
+                    success: false,
+                    status: response.status,
 
-            const text =
-                await response.text();
+                    message:
+                        "Instagram feed request failed.",
 
+                    response:
+                        text.substring(0, 300)
+                })
+            };
+        }
 
-            console.log(
-                "Instagram HTTP:",
-                response.status
-            );
+        /*
+         * PARSE JSON
+         */
 
+        let data;
 
-            console.log(
-                "Response length:",
-                text.length
-            );
+        try {
 
+            data = JSON.parse(text);
 
-            if (!response.ok) {
+        } catch (error) {
+
+            return {
+                statusCode: 502,
+
+                headers: {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*"
+                },
+
+                body: JSON.stringify({
+                    success: false,
+
+                    message:
+                        "Instagram did not return JSON.",
+
+                    response:
+                        text.substring(0, 300)
+                })
+            };
+        }
+
+        /*
+         * EXTRACT USER DATA
+         */
+
+        const user =
+            data?.data?.user ||
+            data?.user ||
+            null;
+
+        if (!user) {
+
+            return {
+                statusCode: 502,
+
+                headers: {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*"
+                },
+
+                body: JSON.stringify({
+                    success: false,
+
+                    message:
+                        "Instagram profile data not found."
+                })
+            };
+        }
+
+        /*
+         * EXTRACT TIMELINE
+         */
+
+        const timeline =
+            user.edge_owner_to_timeline_media ||
+            user.edge_felix_video_timeline ||
+            {};
+
+        const edges =
+            Array.isArray(timeline.edges)
+                ? timeline.edges
+                : [];
+
+        console.log(
+            "Instagram timeline items:",
+            edges.length
+        );
+
+        /*
+         * CONVERT PROFILE RESPONSE
+         * INTO ORIGINAL ITEM STRUCTURE
+         */
+
+        const items = edges
+            .map(edge => edge?.node)
+            .filter(Boolean)
+            .map(node => {
+
+                const carouselMedia =
+                    Array.isArray(
+                        node.edge_sidecar_to_children?.edges
+                    )
+                        ? node.edge_sidecar_to_children.edges
+                            .map(child => child?.node)
+                            .filter(Boolean)
+                            .map(child => ({
+                                image_versions2: {
+                                    candidates: [
+                                        {
+                                            url:
+                                                child.display_url ||
+                                                child.thumbnail_src ||
+                                                ""
+                                        }
+                                    ]
+                                }
+                            }))
+                        : [];
 
                 return {
 
-                    statusCode: 502,
-
-                    headers: {
-                        "Content-Type":
-                            "application/json",
-
-                        "Access-Control-Allow-Origin":
-                            "*"
-                    },
-
-                    body: JSON.stringify({
-
-                        success: false,
-
-                        status:
-                            response.status,
-
-                        message:
-                            "Instagram feed request failed.",
-
-                        response:
-                            text.substring(0, 500)
-
-                    })
-
-                };
-
-            }
-
-
-            let data;
-
-
-            try {
-
-                data =
-                    JSON.parse(text);
-
-            }
-            catch (error) {
-
-                return {
-
-                    statusCode: 502,
-
-                    headers: {
-                        "Content-Type":
-                            "application/json",
-
-                        "Access-Control-Allow-Origin":
-                            "*"
-                    },
-
-                    body: JSON.stringify({
-
-                        success: false,
-
-                        message:
-                            "Instagram did not return JSON.",
-
-                        response:
-                            text.substring(0, 500)
-
-                    })
-
-                };
-
-            }
-
-
-            const items =
-                Array.isArray(data.items)
-                    ? data.items
-                    : [];
-
-
-            console.log(
-                "Items received:",
-                items.length
-            );
-
-
-            /*
-             * Convert Instagram items
-             */
-
-            for (const item of items) {
-
-                if (
-                    allPosts.length >=
-                    MAX_POSTS
-                ) {
-
-                    break;
-
-                }
-
-
-                const shortcode =
-                    item.code ||
-                    item.media_code ||
-                    item.pk;
-
-
-                if (!shortcode) {
-                    continue;
-                }
-
-
-                /*
-                 * Avoid duplicate posts
-                 */
-
-                const alreadyExists =
-                    allPosts.some(
-                        post =>
-                            post.id ===
-                            String(
-                                item.pk ||
-                                shortcode
-                            )
-                    );
-
-
-                if (alreadyExists) {
-                    continue;
-                }
-
-
-                let image = "";
-
-
-                /*
-                 * Normal image
-                 */
-
-                if (
-                    item.image_versions2 &&
-                    Array.isArray(
-                        item.image_versions2.candidates
-                    ) &&
-                    item.image_versions2.candidates.length > 0
-                ) {
-
-                    image =
-                        item.image_versions2
-                            .candidates[0]
-                            .url || "";
-
-                }
-
-
-                /*
-                 * Carousel image
-                 */
-
-                if (
-                    !image &&
-                    Array.isArray(
-                        item.carousel_media
-                    ) &&
-                    item.carousel_media.length > 0
-                ) {
-
-                    const first =
-                        item.carousel_media[0];
-
-
-                    if (
-                        first.image_versions2 &&
-                        Array.isArray(
-                            first.image_versions2.candidates
-                        ) &&
-                        first.image_versions2.candidates.length
-                    ) {
-
-                        image =
-                            first.image_versions2
-                                .candidates[0]
-                                .url || "";
-
-                    }
-
-                }
-
-
-                if (!image) {
-                    continue;
-                }
-
-
-                /*
-                 * Date
-                 */
-
-                let date = "";
-
-
-                if (item.taken_at) {
-
-                    const timestamp =
-                        Number(item.taken_at) *
-                        1000;
-
-
-                    const d =
-                        new Date(timestamp);
-
-
-                    date =
-                        d.toLocaleDateString(
-                            "en-IN",
+                    pk:
+                        node.id ||
+                        node.pk ||
+                        node.shortcode,
+
+                    code:
+                        node.shortcode ||
+                        node.code,
+
+                    media_code:
+                        node.shortcode ||
+                        node.code,
+
+                    image_versions2: {
+                        candidates: [
                             {
-                                day: "2-digit",
-                                month: "short",
-                                year: "numeric"
+                                url:
+                                    node.display_url ||
+                                    node.thumbnail_src ||
+                                    ""
                             }
-                        );
+                        ]
+                    },
 
-                }
+                    carousel_media:
+                        carouselMedia,
 
-
-                /*
-                 * Media type
-                 */
-
-                let mediaType =
-                    "IMAGE";
-
-
-                if (item.media_type === 2) {
-
-                    mediaType =
-                        "VIDEO";
-
-                }
-
-
-                if (item.media_type === 8) {
-
-                    mediaType =
-                        "CAROUSEL";
-
-                }
-
-
-                /*
-                 * Instagram URL
-                 */
-
-                const postUrl =
-                    `https://www.instagram.com/p/${item.code || shortcode}/`;
-
-
-                allPosts.push({
-
-                    id:
-                        String(
-                            item.pk ||
-                            shortcode
-                        ),
-
-                    url:
-                        postUrl,
-
-                    image:
-                        image,
-
-                    date:
-                        date,
+                    taken_at:
+                        node.taken_at_timestamp ||
+                        node.taken_at ||
+                        null,
 
                     media_type:
-                        mediaType
+                        node.edge_sidecar_to_children
+                            ? 8
+                            : node.is_video
+                                ? 2
+                                : 1
 
-                });
+                };
 
-            }
+            });
 
+        console.log(
+            "Items received:",
+            items.length
+        );
 
-            /*
-             * Already have 12
-             */
+        /*
+         * CONVERT INSTAGRAM ITEMS
+         */
+
+        for (const item of items) {
 
             if (
-                allPosts.length >=
-                MAX_POSTS
+                allPosts.length >= MAX_POSTS
             ) {
 
                 break;
 
             }
 
+            const shortcode =
+                item.code ||
+                item.media_code ||
+                item.pk;
+
+            if (!shortcode) {
+                continue;
+            }
 
             /*
-             * Get next page cursor
+             * AVOID DUPLICATE POSTS
              */
 
-            maxId =
-                data.next_max_id ||
-                data.next_page_max_id ||
-                null;
-
-
-            /*
-             * No next page
-             */
-
-            if (!maxId) {
-
-                console.log(
-                    "No more Instagram pages."
+            const alreadyExists =
+                allPosts.some(
+                    post =>
+                        post.id ===
+                        String(
+                            item.pk ||
+                            shortcode
+                        )
                 );
 
-                break;
+            if (alreadyExists) {
+                continue;
+            }
+
+            let image = "";
+
+            /*
+             * NORMAL IMAGE
+             */
+
+            if (
+                item.image_versions2 &&
+                Array.isArray(
+                    item.image_versions2.candidates
+                ) &&
+                item.image_versions2.candidates.length > 0
+            ) {
+
+                image =
+                    item.image_versions2
+                        .candidates[0]
+                        .url || "";
 
             }
 
+            /*
+             * CAROUSEL IMAGE
+             */
+
+            if (
+                !image &&
+                Array.isArray(item.carousel_media) &&
+                item.carousel_media.length > 0
+            ) {
+
+                const first =
+                    item.carousel_media[0];
+
+                if (
+                    first.image_versions2 &&
+                    Array.isArray(
+                        first.image_versions2.candidates
+                    ) &&
+                    first.image_versions2.candidates.length
+                ) {
+
+                    image =
+                        first.image_versions2
+                            .candidates[0]
+                            .url || "";
+
+                }
+
+            }
+
+            if (!image) {
+                continue;
+            }
+
+            /*
+             * DATE FORMATTING
+             */
+
+            let date = "";
+
+            if (item.taken_at) {
+
+                const timestamp =
+                    Number(item.taken_at) * 1000;
+
+                const d =
+                    new Date(timestamp);
+
+                date =
+                    d.toLocaleDateString(
+                        "en-IN",
+                        {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric"
+                        }
+                    );
+
+            }
+
+            /*
+             * MEDIA TYPE
+             */
+
+            let mediaType = "IMAGE";
+
+            if (item.media_type === 2) {
+
+                mediaType = "VIDEO";
+
+            }
+
+            if (item.media_type === 8) {
+
+                mediaType = "CAROUSEL";
+
+            }
+
+            /*
+             * INSTAGRAM POST URL
+             */
+
+            const postUrl =
+                `https://www.instagram.com/p/${item.code || shortcode}/`;
+
+            allPosts.push({
+
+                id:
+                    String(
+                        item.pk ||
+                        shortcode
+                    ),
+
+                url:
+                    postUrl,
+
+                image:
+                    image,
+
+                date:
+                    date,
+
+                media_type:
+                    mediaType
+
+            });
+
         }
 
+        /*
+         * PAGINATION INFORMATION
+         */
+
+        const pageInfo =
+            timeline.page_info || {};
+
+        maxId =
+            pageInfo.end_cursor ||
+            null;
+
+        console.log(
+            "Has next page:",
+            Boolean(pageInfo.has_next_page)
+        );
 
         /*
-         * Return maximum 12 posts
+         * RETURN MAXIMUM 12 POSTS
          */
 
         allPosts =
@@ -412,7 +449,6 @@ exports.handler = async function () {
                 0,
                 MAX_POSTS
             );
-
 
         return {
 
@@ -427,7 +463,7 @@ exports.handler = async function () {
                     "*",
 
                 "Cache-Control":
-                    "public, max-age=1800"
+                    "public, max-age=900"
 
             },
 
@@ -443,20 +479,30 @@ exports.handler = async function () {
                     allPosts.length,
 
                 posts:
-                    allPosts
+                    allPosts,
+
+                pagination: {
+
+                    has_next_page:
+                        Boolean(pageInfo.has_next_page),
+
+                    end_cursor:
+                        maxId
+
+                }
 
             })
 
         };
 
     }
+
     catch (error) {
 
         console.error(
             "Instagram error:",
             error
         );
-
 
         return {
 
