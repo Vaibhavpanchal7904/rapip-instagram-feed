@@ -1,157 +1,209 @@
 
+const { getStore } = await import("@netlify/blobs");
+
 exports.handler = async function () {
-
     const username = "rapip__cvmu";
-
-    const headers = {
-        "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-            "AppleWebKit/537.36 (KHTML, like Gecko) " +
-            "Chrome/140.0.0.0 Safari/537.36",
-
-        "X-IG-App-ID": "936619743392459",
-        "Accept": "*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-
-        "Referer":
-            `https://www.instagram.com/${username}/`,
-
-        "X-Requested-With": "XMLHttpRequest"
-    };
 
     const MAX_POSTS = 12;
 
-    let allPosts = [];
+    const CACHE_DURATION = 30 * 60 * 1000;
+    const RETRY_COOLDOWN = 15 * 60 * 1000;
 
-    let maxId = null;
+    const CACHE_KEY = `instagram-${username}`;
+    const STATE_KEY = `instagram-state-${username}`;
+
+    const store = getStore("rapipi-instagram-cache");
+
+    const responseHeaders = {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=300"
+    };
+
+    const sendResponse = (statusCode, body) => ({
+        statusCode,
+        headers: responseHeaders,
+        body: JSON.stringify(body)
+    });
+
+    /*
+     * READ PERSISTENT CACHE
+     */
+
+    let cachedData = null;
+    let refreshState = null;
+
+    try {
+        cachedData = await store.get(CACHE_KEY, {
+            type: "json",
+            consistency: "strong"
+        });
+
+        refreshState = await store.get(STATE_KEY, {
+            type: "json",
+            consistency: "strong"
+        });
+
+    } catch (error) {
+        console.error("Instagram cache read error:", error.message);
+    }
+
+    const now = Date.now();
+
+    const cachedPosts =
+        Array.isArray(cachedData?.posts)
+            ? cachedData.posts
+            : [];
+
+    const hasCache = cachedPosts.length > 0;
+
+    const cacheAge =
+        cachedData?.updatedAt
+            ? now - cachedData.updatedAt
+            : Infinity;
+
+    const cacheIsFresh =
+        hasCache && cacheAge < CACHE_DURATION;
+
+    /*
+     * RETURN FRESH CACHE
+     */
+
+    if (cacheIsFresh) {
+
+        console.log("Instagram: Serving fresh cached posts.");
+
+        return sendResponse(200, {
+            success: true,
+            username,
+            count: cachedPosts.length,
+            posts: cachedPosts,
+            cached: true,
+            stale: false,
+            lastUpdated: cachedData.updatedAt
+        });
+    }
+
+    /*
+     * CHECK RETRY COOLDOWN
+     */
+
+    const lastAttempt =
+        Number(refreshState?.lastAttempt || 0);
+
+    const cooldownActive =
+        now - lastAttempt < RETRY_COOLDOWN;
+
+    if (cooldownActive) {
+
+        if (hasCache) {
+
+            console.log(
+                "Instagram: Returning stale cache during cooldown."
+            );
+
+            return sendResponse(200, {
+                success: true,
+                username,
+                count: cachedPosts.length,
+                posts: cachedPosts,
+                cached: true,
+                stale: true,
+                lastUpdated: cachedData.updatedAt,
+                message: "Showing previously cached Instagram posts."
+            });
+        }
+
+        const retryAfter = Math.ceil(
+            (RETRY_COOLDOWN - (now - lastAttempt)) / 1000
+        );
+
+        return sendResponse(503, {
+            success: false,
+            username,
+            count: 0,
+            posts: [],
+            cached: false,
+            message: "Instagram refresh is temporarily on cooldown.",
+            retryAfter
+        });
+    }
+
+    /*
+     * RECORD REFRESH ATTEMPT
+     *
+     * This reduces repeated upstream requests.
+     */
 
     try {
 
-        /*
-         * FETCH INSTAGRAM PUBLIC PROFILE
-         */
+        await store.setJSON(STATE_KEY, {
+            lastAttempt: now
+        });
+
+    } catch (error) {
+
+        console.error(
+            "Instagram refresh state error:",
+            error.message
+        );
+    }
+
+    /*
+     * FETCH INSTAGRAM PROFILE
+     */
+
+    try {
 
         const apiUrl =
             `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
 
-        console.log(
-            "Instagram request:",
-            apiUrl
-        );
+        const response = await fetch(apiUrl, {
+            method: "GET",
 
-        const response = await fetch(
-            apiUrl,
-            {
-                method: "GET",
-                headers: headers,
-                redirect: "follow"
-            }
-        );
+            headers: {
+                "User-Agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                    "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                    "Chrome/140.0.0.0 Safari/537.36",
 
-        const text = await response.text();
+                "X-IG-App-ID": "936619743392459",
+
+                "Accept": "*/*",
+
+                "Accept-Language": "en-US,en;q=0.9",
+
+                "Referer":
+                    `https://www.instagram.com/${username}/`,
+
+                "X-Requested-With": "XMLHttpRequest"
+            },
+
+            redirect: "follow",
+            signal: AbortSignal.timeout(12000)
+        });
 
         console.log(
             "Instagram HTTP:",
             response.status
         );
 
-        console.log(
-            "Response length:",
-            text.length
-        );
+        if (!response.ok) {
 
-        /*
-         * HANDLE HTTP ERRORS
-         */
+            console.error(
+                "Instagram upstream error:",
+                response.status
+            );
 
-        
-if (!response.ok) {
-
-    const status = response.status;
-
-    const retryAfter =
-        response.headers.get("Retry-After") || "900";
-
-    console.error(
-        "Instagram HTTP Error:",
-        status
-    );
-
-    if (status === 429) {
-
-        return {
-            statusCode: 429,
-
-            headers: {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "no-store",
-                "Retry-After": retryAfter
-            },
-
-            body: JSON.stringify({
-                success: false,
-                status: 429,
-
-                message:
-                    "Instagram rate limit reached. Please try again later.",
-
-                retryAfter: Number(retryAfter) || 900
-            })
-        };
-    }
-
-    return {
-        statusCode: 502,
-
-        headers: {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "no-store"
-        },
-
-        body: JSON.stringify({
-            success: false,
-            status: status,
-            message: "Instagram feed request failed."
-        })
-    };
-}
-
-        /*
-         * PARSE JSON
-         */
-
-        let data;
-
-        try {
-
-            data = JSON.parse(text);
-
-        } catch (error) {
-
-            return {
-                statusCode: 502,
-
-                headers: {
-                    "Content-Type": "application/json",
-                    "Access-Control-Allow-Origin": "*"
-                },
-
-                body: JSON.stringify({
-                    success: false,
-
-                    message:
-                        "Instagram did not return JSON.",
-
-                    response:
-                        text.substring(0, 300)
-                })
-            };
+            throw new Error(
+                `Instagram returned HTTP ${response.status}`
+            );
         }
 
+        const data = await response.json();
+
         /*
-         * EXTRACT USER DATA
+         * EXTRACT PROFILE
          */
 
         const user =
@@ -160,22 +212,7 @@ if (!response.ok) {
             null;
 
         if (!user) {
-
-            return {
-                statusCode: 502,
-
-                headers: {
-                    "Content-Type": "application/json",
-                    "Access-Control-Allow-Origin": "*"
-                },
-
-                body: JSON.stringify({
-                    success: false,
-
-                    message:
-                        "Instagram profile data not found."
-                })
-            };
+            throw new Error("Instagram profile data not found.");
         }
 
         /*
@@ -197,177 +234,75 @@ if (!response.ok) {
             edges.length
         );
 
-        /*
-         * CONVERT PROFILE RESPONSE
-         * INTO ORIGINAL ITEM STRUCTURE
-         */
-
-        const items = edges
-            .map(edge => edge?.node)
-            .filter(Boolean)
-            .map(node => {
-
-                const carouselMedia =
-                    Array.isArray(
-                        node.edge_sidecar_to_children?.edges
-                    )
-                        ? node.edge_sidecar_to_children.edges
-                            .map(child => child?.node)
-                            .filter(Boolean)
-                            .map(child => ({
-                                image_versions2: {
-                                    candidates: [
-                                        {
-                                            url:
-                                                child.display_url ||
-                                                child.thumbnail_src ||
-                                                ""
-                                        }
-                                    ]
-                                }
-                            }))
-                        : [];
-
-                return {
-
-                    pk:
-                        node.id ||
-                        node.pk ||
-                        node.shortcode,
-
-                    code:
-                        node.shortcode ||
-                        node.code,
-
-                    media_code:
-                        node.shortcode ||
-                        node.code,
-
-                    image_versions2: {
-                        candidates: [
-                            {
-                                url:
-                                    node.display_url ||
-                                    node.thumbnail_src ||
-                                    ""
-                            }
-                        ]
-                    },
-
-                    carousel_media:
-                        carouselMedia,
-
-                    taken_at:
-                        node.taken_at_timestamp ||
-                        node.taken_at ||
-                        null,
-
-                    media_type:
-                        node.edge_sidecar_to_children
-                            ? 8
-                            : node.is_video
-                                ? 2
-                                : 1
-
-                };
-
-            });
-
-        console.log(
-            "Items received:",
-            items.length
-        );
+        const allPosts = [];
 
         /*
-         * CONVERT INSTAGRAM ITEMS
+         * PROCESS POSTS
          */
 
-        for (const item of items) {
+        for (const edge of edges) {
 
-            if (
-                allPosts.length >= MAX_POSTS
-            ) {
-
+            if (allPosts.length >= MAX_POSTS) {
                 break;
+            }
 
+            const item = edge?.node;
+
+            if (!item) {
+                continue;
             }
 
             const shortcode =
-                item.code ||
-                item.media_code ||
-                item.pk;
+                item.shortcode ||
+                item.code;
 
             if (!shortcode) {
                 continue;
             }
 
-            /*
-             * AVOID DUPLICATE POSTS
-             */
+            let image =
+                item.display_url ||
+                item.thumbnail_src ||
+                "";
 
-            const alreadyExists =
-                allPosts.some(
-                    post =>
-                        post.id ===
-                        String(
-                            item.pk ||
-                            shortcode
-                        )
-                );
-
-            if (alreadyExists) {
-                continue;
-            }
-
-            let image = "";
+            let mediaType = "IMAGE";
 
             /*
-             * NORMAL IMAGE
+             * VIDEO
              */
 
-            if (
-                item.image_versions2 &&
-                Array.isArray(
-                    item.image_versions2.candidates
-                ) &&
-                item.image_versions2.candidates.length > 0
-            ) {
-
-                image =
-                    item.image_versions2
-                        .candidates[0]
-                        .url || "";
-
+            if (item.is_video) {
+                mediaType = "VIDEO";
             }
 
             /*
-             * CAROUSEL IMAGE
+             * CAROUSEL
              */
 
+            const carouselEdges =
+                item.edge_sidecar_to_children?.edges;
+
             if (
-                !image &&
-                Array.isArray(item.carousel_media) &&
-                item.carousel_media.length > 0
+                Array.isArray(carouselEdges) &&
+                carouselEdges.length > 0
             ) {
 
-                const first =
-                    item.carousel_media[0];
+                mediaType = "CAROUSEL";
 
-                if (
-                    first.image_versions2 &&
-                    Array.isArray(
-                        first.image_versions2.candidates
-                    ) &&
-                    first.image_versions2.candidates.length
-                ) {
+                const firstImage = carouselEdges
+                    .map(child => child?.node)
+                    .find(node =>
+                        node?.display_url ||
+                        node?.thumbnail_src
+                    );
+
+                if (firstImage) {
 
                     image =
-                        first.image_versions2
-                            .candidates[0]
-                            .url || "";
-
+                        firstImage.display_url ||
+                        firstImage.thumbnail_src ||
+                        image;
                 }
-
             }
 
             if (!image) {
@@ -375,188 +310,140 @@ if (!response.ok) {
             }
 
             /*
-             * DATE FORMATTING
+             * DATE
              */
 
             let date = "";
 
-            if (item.taken_at) {
+            const timestamp =
+                item.taken_at_timestamp ||
+                item.taken_at;
 
-                const timestamp =
-                    Number(item.taken_at) * 1000;
+            if (timestamp) {
 
-                const d =
-                    new Date(timestamp);
-
-                date =
-                    d.toLocaleDateString(
-                        "en-IN",
-                        {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric"
-                        }
-                    );
-
+                date = new Date(
+                    Number(timestamp) * 1000
+                ).toLocaleDateString("en-IN", {
+                    day: "2-digit",
+                    month: "short",
+                    year: "numeric"
+                });
             }
 
             /*
-             * MEDIA TYPE
+             * ADD POST
              */
-
-            let mediaType = "IMAGE";
-
-            if (item.media_type === 2) {
-
-                mediaType = "VIDEO";
-
-            }
-
-            if (item.media_type === 8) {
-
-                mediaType = "CAROUSEL";
-
-            }
-
-            /*
-             * INSTAGRAM POST URL
-             */
-
-            const postUrl =
-                `https://www.instagram.com/p/${item.code || shortcode}/`;
 
             allPosts.push({
 
-                id:
-                    String(
-                        item.pk ||
-                        shortcode
-                    ),
+                id: String(
+                    item.id ||
+                    shortcode
+                ),
 
                 url:
-                    postUrl,
+                    `https://www.instagram.com/p/${shortcode}/`,
 
-                image:
-                    image,
+                image,
 
-                date:
-                    date,
+                date,
 
-                media_type:
-                    mediaType
+                media_type: mediaType
 
             });
-
         }
 
         /*
-         * PAGINATION INFORMATION
+         * VALIDATE POSTS
          */
 
-        const pageInfo =
-            timeline.page_info || {};
+        if (allPosts.length === 0) {
 
-        maxId =
-            pageInfo.end_cursor ||
-            null;
+            throw new Error(
+                "Instagram returned no usable posts."
+            );
+        }
+
+        /*
+         * SAVE NEW POSTS TO NETLIFY BLOBS
+         */
+
+        const newCache = {
+            username,
+            posts: allPosts.slice(0, MAX_POSTS),
+            updatedAt: Date.now()
+        };
+
+        await store.setJSON(CACHE_KEY, newCache);
 
         console.log(
-            "Has next page:",
-            Boolean(pageInfo.has_next_page)
+            "Instagram cache successfully updated:",
+            newCache.posts.length
         );
 
         /*
-         * RETURN MAXIMUM 12 POSTS
+         * RETURN FRESH POSTS
          */
 
-        allPosts =
-            allPosts.slice(
-                0,
-                MAX_POSTS
-            );
+        return sendResponse(200, {
+            success: true,
+            username,
+            count: newCache.posts.length,
+            posts: newCache.posts,
+            cached: false,
+            stale: false,
+            lastUpdated: newCache.updatedAt
+        });
 
-        return {
-
-            statusCode: 200,
-
-            headers: {
-
-                "Content-Type":
-                    "application/json",
-
-                "Access-Control-Allow-Origin":
-                    "*",
-
-                "Cache-Control":
-                    "public, max-age=900"
-
-            },
-
-            body: JSON.stringify({
-
-                success:
-                    allPosts.length > 0,
-
-                username:
-                    username,
-
-                count:
-                    allPosts.length,
-
-                posts:
-                    allPosts,
-
-                pagination: {
-
-                    has_next_page:
-                        Boolean(pageInfo.has_next_page),
-
-                    end_cursor:
-                        maxId
-
-                }
-
-            })
-
-        };
-
-    }
-
-    catch (error) {
+    } catch (error) {
 
         console.error(
-            "Instagram error:",
-            error
+            "Instagram refresh failed:",
+            error.message
         );
 
-        return {
+        /*
+         * FALLBACK TO OLD POSTS
+         */
 
-            statusCode: 500,
+        if (hasCache) {
 
-            headers: {
+            console.log(
+                "Instagram: Serving previous cached posts."
+            );
 
-                "Content-Type":
-                    "application/json",
-
-                "Access-Control-Allow-Origin":
-                    "*"
-
-            },
-
-            body: JSON.stringify({
-
-                success: false,
-
+            return sendResponse(200, {
+                success: true,
+                username,
+                count: cachedPosts.length,
+                posts: cachedPosts,
+                cached: true,
+                stale: true,
+                lastUpdated: cachedData.updatedAt,
                 message:
-                    "Function error",
+                    "Instagram is temporarily unavailable. Showing previously saved posts."
+            });
+        }
 
-                error:
-                    error.message
+        /*
+         * NO CACHE AVAILABLE
+         */
 
-            })
+        const isRateLimited =
+            error.message.includes("429");
 
-        };
-
+        return sendResponse(
+            isRateLimited ? 429 : 502,
+            {
+                success: false,
+                username,
+                count: 0,
+                posts: [],
+                cached: false,
+                message:
+                    "Instagram posts could not be loaded.",
+                error: error.message
+            }
+        );
     }
-
 };
