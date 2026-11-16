@@ -1,9 +1,9 @@
 
-const { getStore } = await import("@netlify/blobs");
-
 exports.handler = async function () {
-    const username = "rapip__cvmu";
 
+    const { getStore } = await import("@netlify/blobs");
+
+    const username = "rapip__cvmu";
     const MAX_POSTS = 12;
 
     const CACHE_DURATION = 30 * 60 * 1000;
@@ -14,21 +14,17 @@ exports.handler = async function () {
 
     const store = getStore("rapipi-instagram-cache");
 
-    const responseHeaders = {
+    const headers = {
         "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*",
         "Cache-Control": "public, max-age=300"
     };
 
-    const sendResponse = (statusCode, body) => ({
+    const send = (statusCode, body) => ({
         statusCode,
-        headers: responseHeaders,
+        headers,
         body: JSON.stringify(body)
     });
-
-    /*
-     * READ PERSISTENT CACHE
-     */
 
     let cachedData = null;
     let refreshState = null;
@@ -43,37 +39,28 @@ exports.handler = async function () {
             type: "json",
             consistency: "strong"
         });
-
     } catch (error) {
-        console.error("Instagram cache read error:", error.message);
+        console.error("Cache read error:", error.message);
     }
 
     const now = Date.now();
 
-    const cachedPosts =
-        Array.isArray(cachedData?.posts)
-            ? cachedData.posts
-            : [];
+    const cachedPosts = Array.isArray(cachedData?.posts)
+        ? cachedData.posts
+        : [];
 
     const hasCache = cachedPosts.length > 0;
 
-    const cacheAge =
-        cachedData?.updatedAt
-            ? now - cachedData.updatedAt
-            : Infinity;
+    const cacheAge = cachedData?.updatedAt
+        ? now - cachedData.updatedAt
+        : Infinity;
 
     const cacheIsFresh =
         hasCache && cacheAge < CACHE_DURATION;
 
-    /*
-     * RETURN FRESH CACHE
-     */
-
+    // 1. Serve fresh cache
     if (cacheIsFresh) {
-
-        console.log("Instagram: Serving fresh cached posts.");
-
-        return sendResponse(200, {
+        return send(200, {
             success: true,
             username,
             count: cachedPosts.length,
@@ -84,25 +71,14 @@ exports.handler = async function () {
         });
     }
 
-    /*
-     * CHECK RETRY COOLDOWN
-     */
-
+    // 2. Check refresh cooldown
     const lastAttempt =
         Number(refreshState?.lastAttempt || 0);
 
-    const cooldownActive =
-        now - lastAttempt < RETRY_COOLDOWN;
-
-    if (cooldownActive) {
+    if (now - lastAttempt < RETRY_COOLDOWN) {
 
         if (hasCache) {
-
-            console.log(
-                "Instagram: Returning stale cache during cooldown."
-            );
-
-            return sendResponse(200, {
+            return send(200, {
                 success: true,
                 username,
                 count: cachedPosts.length,
@@ -110,57 +86,39 @@ exports.handler = async function () {
                 cached: true,
                 stale: true,
                 lastUpdated: cachedData.updatedAt,
-                message: "Showing previously cached Instagram posts."
+                message: "Showing previously saved posts."
             });
         }
 
-        const retryAfter = Math.ceil(
-            (RETRY_COOLDOWN - (now - lastAttempt)) / 1000
-        );
-
-        return sendResponse(503, {
+        return send(503, {
             success: false,
             username,
             count: 0,
             posts: [],
-            cached: false,
-            message: "Instagram refresh is temporarily on cooldown.",
-            retryAfter
+            message: "Instagram refresh is on cooldown.",
+            retryAfter: Math.ceil(
+                (RETRY_COOLDOWN - (now - lastAttempt)) / 1000
+            )
         });
     }
 
-    /*
-     * RECORD REFRESH ATTEMPT
-     *
-     * This reduces repeated upstream requests.
-     */
-
+    // 3. Record refresh attempt
     try {
-
         await store.setJSON(STATE_KEY, {
             lastAttempt: now
         });
-
     } catch (error) {
-
-        console.error(
-            "Instagram refresh state error:",
-            error.message
-        );
+        console.error("Cooldown storage error:", error.message);
     }
-
-    /*
-     * FETCH INSTAGRAM PROFILE
-     */
 
     try {
 
+        // 4. Request Instagram profile
         const apiUrl =
             `https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`;
 
         const response = await fetch(apiUrl, {
             method: "GET",
-
             headers: {
                 "User-Agent":
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
@@ -168,9 +126,7 @@ exports.handler = async function () {
                     "Chrome/140.0.0.0 Safari/537.36",
 
                 "X-IG-App-ID": "936619743392459",
-
                 "Accept": "*/*",
-
                 "Accept-Language": "en-US,en;q=0.9",
 
                 "Referer":
@@ -178,23 +134,13 @@ exports.handler = async function () {
 
                 "X-Requested-With": "XMLHttpRequest"
             },
-
             redirect: "follow",
             signal: AbortSignal.timeout(12000)
         });
 
-        console.log(
-            "Instagram HTTP:",
-            response.status
-        );
+        console.log("Instagram HTTP:", response.status);
 
         if (!response.ok) {
-
-            console.error(
-                "Instagram upstream error:",
-                response.status
-            );
-
             throw new Error(
                 `Instagram returned HTTP ${response.status}`
             );
@@ -202,83 +148,59 @@ exports.handler = async function () {
 
         const data = await response.json();
 
-        /*
-         * EXTRACT PROFILE
-         */
-
+        // 5. Extract profile
         const user =
             data?.data?.user ||
             data?.user ||
             null;
 
         if (!user) {
-            throw new Error("Instagram profile data not found.");
+            throw new Error("Instagram profile not found.");
         }
 
-        /*
-         * EXTRACT TIMELINE
-         */
-
+        // 6. Extract timeline
         const timeline =
             user.edge_owner_to_timeline_media ||
             user.edge_felix_video_timeline ||
             {};
 
-        const edges =
-            Array.isArray(timeline.edges)
-                ? timeline.edges
-                : [];
+        const edges = Array.isArray(timeline.edges)
+            ? timeline.edges
+            : [];
 
-        console.log(
-            "Instagram timeline items:",
-            edges.length
-        );
+        console.log("Timeline items:", edges.length);
 
         const allPosts = [];
+        const seenPosts = new Set();
 
-        /*
-         * PROCESS POSTS
-         */
-
+        // 7. Process posts
         for (const edge of edges) {
 
-            if (allPosts.length >= MAX_POSTS) {
-                break;
-            }
+            if (allPosts.length >= MAX_POSTS) break;
 
             const item = edge?.node;
 
-            if (!item) {
-                continue;
-            }
+            if (!item) continue;
 
             const shortcode =
-                item.shortcode ||
-                item.code;
+                item.shortcode || item.code;
 
-            if (!shortcode) {
+            if (!shortcode || seenPosts.has(shortcode)) {
                 continue;
             }
+
+            seenPosts.add(shortcode);
 
             let image =
                 item.display_url ||
                 item.thumbnail_src ||
                 "";
 
-            let mediaType = "IMAGE";
+            let mediaType = item.is_video
+                ? "VIDEO"
+                : "IMAGE";
 
-            /*
-             * VIDEO
-             */
-
-            if (item.is_video) {
-                mediaType = "VIDEO";
-            }
-
-            /*
-             * CAROUSEL
-             */
-
+            // Carousel support
             const carouselEdges =
                 item.edge_sidecar_to_children?.edges;
 
@@ -297,7 +219,6 @@ exports.handler = async function () {
                     );
 
                 if (firstImage) {
-
                     image =
                         firstImage.display_url ||
                         firstImage.thumbnail_src ||
@@ -305,14 +226,9 @@ exports.handler = async function () {
                 }
             }
 
-            if (!image) {
-                continue;
-            }
+            if (!image) continue;
 
-            /*
-             * DATE
-             */
-
+            // Date formatting
             let date = "";
 
             const timestamp =
@@ -320,7 +236,6 @@ exports.handler = async function () {
                 item.taken_at;
 
             if (timestamp) {
-
                 date = new Date(
                     Number(timestamp) * 1000
                 ).toLocaleDateString("en-IN", {
@@ -330,44 +245,25 @@ exports.handler = async function () {
                 });
             }
 
-            /*
-             * ADD POST
-             */
-
             allPosts.push({
-
-                id: String(
-                    item.id ||
-                    shortcode
-                ),
+                id: String(item.id || shortcode),
 
                 url:
                     `https://www.instagram.com/p/${shortcode}/`,
 
                 image,
-
                 date,
-
                 media_type: mediaType
-
             });
         }
 
-        /*
-         * VALIDATE POSTS
-         */
+        console.log("Posts extracted:", allPosts.length);
 
         if (allPosts.length === 0) {
-
-            throw new Error(
-                "Instagram returned no usable posts."
-            );
+            throw new Error("No usable Instagram posts found.");
         }
 
-        /*
-         * SAVE NEW POSTS TO NETLIFY BLOBS
-         */
-
+        // 8. Save persistent cache
         const newCache = {
             username,
             posts: allPosts.slice(0, MAX_POSTS),
@@ -376,16 +272,10 @@ exports.handler = async function () {
 
         await store.setJSON(CACHE_KEY, newCache);
 
-        console.log(
-            "Instagram cache successfully updated:",
-            newCache.posts.length
-        );
+        console.log("Instagram cache updated successfully.");
 
-        /*
-         * RETURN FRESH POSTS
-         */
-
-        return sendResponse(200, {
+        // 9. Return fresh posts
+        return send(200, {
             success: true,
             username,
             count: newCache.posts.length,
@@ -402,17 +292,12 @@ exports.handler = async function () {
             error.message
         );
 
-        /*
-         * FALLBACK TO OLD POSTS
-         */
-
+        // 10. Serve previous posts on failure
         if (hasCache) {
 
-            console.log(
-                "Instagram: Serving previous cached posts."
-            );
+            console.log("Serving stale Instagram cache.");
 
-            return sendResponse(200, {
+            return send(200, {
                 success: true,
                 username,
                 count: cachedPosts.length,
@@ -421,18 +306,15 @@ exports.handler = async function () {
                 stale: true,
                 lastUpdated: cachedData.updatedAt,
                 message:
-                    "Instagram is temporarily unavailable. Showing previously saved posts."
+                    "Instagram temporarily unavailable. Showing saved posts."
             });
         }
 
-        /*
-         * NO CACHE AVAILABLE
-         */
-
+        // 11. No previous cache available
         const isRateLimited =
             error.message.includes("429");
 
-        return sendResponse(
+        return send(
             isRateLimited ? 429 : 502,
             {
                 success: false,
@@ -440,8 +322,7 @@ exports.handler = async function () {
                 count: 0,
                 posts: [],
                 cached: false,
-                message:
-                    "Instagram posts could not be loaded.",
+                message: "Instagram posts could not be loaded.",
                 error: error.message
             }
         );

@@ -130,10 +130,9 @@
                 const apiUrl =
                     "https://rapipi.netlify.app/.netlify/functions/instagram";
 
-                const response = await fetch(apiUrl, {
-                    method: "GET",
-                    cache: "no-store"
-                });
+               const response = await fetch("/instagram.json", {
+    cache: "no-store"
+});
 
                 console.log("HTTP Status:", response.status);
 
