@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>RAPIP Instagram Feed</title>
 
     <style>
@@ -13,35 +14,82 @@
 
         body {
             margin: 0;
-            padding: 25px 15px;
+            padding: 35px 20px;
             font-family: Arial, sans-serif;
             background: #f5f5f5;
+            color: #222;
         }
 
         h1 {
             text-align: center;
-            margin-bottom: 25px;
+            margin-bottom: 10px;
+            font-size: 30px;
         }
 
-        .instagram-container {
-            width: 100%;
+        .subtitle {
+            text-align: center;
+            color: #777;
+            margin-bottom: 30px;
+        }
+
+        .feed-container {
             max-width: 1200px;
             margin: auto;
-            background: white;
-            border-radius: 12px;
+            background: #fff;
+            border-radius: 14px;
             overflow: hidden;
+            box-shadow: 0 5px 25px rgba(0,0,0,0.08);
         }
 
-        iframe {
-            display: block;
+        .feed-header {
+            padding: 18px 22px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #eee;
+        }
+
+        .profile-name {
+            font-weight: bold;
+            font-size: 17px;
+        }
+
+        .instagram-link {
+            text-decoration: none;
+            color: #176b87;
+            font-weight: 600;
+        }
+
+        .instagram-frame {
             width: 100%;
-            height: 1000px;
-            border: none;
+            height: 1100px;
+            border: 0;
+            display: block;
+            background: #fff;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: #777;
+            font-size: 13px;
         }
 
         @media (max-width: 600px) {
-            iframe {
-                height: 850px;
+            body {
+                padding: 20px 10px;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+
+            .feed-header {
+                padding: 15px;
+            }
+
+            .instagram-frame {
+                height: 950px;
             }
         }
     </style>
@@ -51,14 +99,37 @@
 
     <h1>RAPIP Instagram Feed</h1>
 
-    <div class="instagram-container">
+    <p class="subtitle">
+        Latest updates from Rita A. Patel Institute of Physiotherapy
+    </p>
+
+    <main class="feed-container">
+
+        <div class="feed-header">
+            <span class="profile-name">@rapip__cvmu</span>
+
+            <a
+                class="instagram-link"
+                href="https://www.instagram.com/rapip__cvmu/"
+                target="_blank"
+                rel="noopener noreferrer">
+                Visit Instagram →
+            </a>
+        </div>
+
         <iframe
+            class="instagram-frame"
             src="https://www.instagram.com/rapip__cvmu/embed/"
-            title="RAPIP Instagram Feed"
+            title="RAPIP Instagram Posts"
             loading="lazy"
             allowtransparency="true">
         </iframe>
-    </div>
+
+        <div class="footer">
+            Follow RAPIP on Instagram for the latest updates.
+        </div>
+
+    </main>
 
 </body>
 </html>
